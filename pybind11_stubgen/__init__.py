@@ -128,13 +128,26 @@ class FunctionSignature(object):
                 sig=self
             )
             try:
-                ast.parse(function_def_str)
+                try:
+                    ast.parse(function_def_str)
+                except SyntaxError as e:
+                    new_function_def_str = function_def_str.replace(", ", ", *, ", 1) if args.startswith("self") else function_def_str.replace("(", "(*, ", 1)
+                    ast.parse(new_function_def_str)
+                    self.args = args.replace(", ", ", *, ", 1) if args.startswith("self") else "*, " + args
+                    function_def_str = new_function_def_str
+                    FunctionSignature.n_invalid_signatures += 1
+                    lvl = logging.WARNING
+                    logger.log(
+                        lvl,
+                        "Generated stubs signature is degraded to kwargs only signature",
+                    )
+                    logger.log(lvl, function_def_str)
             except SyntaxError as e:
                 FunctionSignature.n_invalid_signatures += 1
                 if FunctionSignature.signature_downgrade:
                     self.name = name
                     self.args = "*args, **kwargs"
-                    self.rtype = "typing.Any"
+                    self.rtype = "None" if name == "__init__" else "typing.Any"
                     lvl = (
                         logging.WARNING
                         if FunctionSignature.ignore_invalid_signature
