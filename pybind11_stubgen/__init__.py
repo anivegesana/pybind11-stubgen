@@ -221,33 +221,58 @@ class PropertySignature(object):
 # If true numpy.ndarray[int32[3,3]] will be reduced to numpy.ndarray
 BARE_NUPMY_NDARRAY = False
 
+USE_NUMPY_NPTYPING = False
+
+numpy_used_modules = set()
+
 
 def replace_numpy_array(match_obj):
+    for obj in reversed(_visited_objects):
+        if isinstance(obj, ModuleStubsGenerator) or inspect.ismodule(obj):
+            numpy_used_modules.add(obj)
+            break
+
     if BARE_NUPMY_NDARRAY:
         return "numpy.ndarray"
     numpy_type = match_obj.group("type")
     # pybind always append size of data type
-    if numpy_type in [
-        "int8",
-        "int16",
-        "int32",
-        "int64",
-        "float16",
-        "float32",
-        "float64",
-        "complex32",
-        "complex64",
-        "longcomplex",
-    ]:
-        numpy_type = "numpy." + numpy_type
+    numpy_type_to_nptyping = {
+        "int8": "Int8",
+        "int16": "Int16",
+        "int32": "Int32",
+        "int64": "Int64",
+        "float16": "Float16",
+        "float32": "Float32",
+        "float64": "Float64",
+        "complex32": "Complex64",
+        "complex64": "Complex128",
+        "longcomplex": "LongComplex",
+    }
 
-    shape = match_obj.group("shape")
-    if shape:
-        shape = ", _Shape[{}]".format(shape)
+    if USE_NUMPY_NPTYPING:
+        if numpy_type in numpy_type_to_nptyping:
+            numpy_type = "nptyping." + numpy_type_to_nptyping[numpy_type]
+        else:
+            numpy_type = "typing.Any"
+        shape = match_obj.group("shape")
+        shape_prefix = "nptyping.Shape"
+        if shape:
+            shape = "{}[\"{}\"]".format(shape_prefix, shape)
+        else:
+            shape = "typing.Any"
+        result = r"nptyping.NDArray[{shape}, {type}]".format(type=numpy_type, shape=shape)
+        return result
     else:
-        shape = ""
-    result = r"numpy.ndarray[{type}{shape}]".format(type=numpy_type, shape=shape)
-    return result
+        if numpy_type in numpy_type_to_nptyping:
+            numpy_type = "numpy." + numpy_type
+
+        shape = match_obj.group("shape")
+        if shape:
+            shape = ", _Shape[{}]".format(shape)
+        else:
+            shape = ""
+        result = r"numpy.ndarray[{type}{shape}]".format(type=numpy_type, shape=shape)
+        return result
 
 
 def replace_typing_types(match):
@@ -961,6 +986,11 @@ class ModuleStubsGenerator(StubsGenerator):
         for f in self.free_functions:  # type: FreeFunctionStubsGenerator
             result |= f.get_involved_modules_names()
 
+        if self.module in numpy_used_modules:
+            result.add("numpy")
+            if USE_NUMPY_NPTYPING:
+                result.add("nptyping")
+
         return set(result) - {"builtins", "typing", self.module.__name__}
 
     def to_lines(self):  # type: () -> List[str]
@@ -995,7 +1025,7 @@ class ModuleStubsGenerator(StubsGenerator):
             # result.extend(map(self.indent, map(lambda m: "import {}".format(m), used_modules)))
             result.extend(map(lambda mod: "import {}".format(mod), used_modules))
 
-        if "numpy" in used_modules and not BARE_NUPMY_NDARRAY:
+        if "numpy" in used_modules and not BARE_NUPMY_NDARRAY and not USE_NUMPY_NPTYPING:
             result += ["_Shape = typing.Tuple[int, ...]"]
 
         # add space between imports and rest of module
@@ -1108,6 +1138,12 @@ def main(args=None):
         help="Render `numpy.ndarray` without (non-standardized) bracket-enclosed type and shape info",
     )
     parser.add_argument(
+        "--use-numpy-nptyping",
+        action="store_true",
+        default=False,
+        help="Use the nptyping library for numpy type hints",
+    )
+    parser.add_argument(
         "module_names", nargs="+", metavar="MODULE_NAME", type=str, help="modules names"
     )
     parser.add_argument("--log-level", default="INFO", help="Set output log level")
@@ -1125,6 +1161,10 @@ def main(args=None):
         global BARE_NUPMY_NDARRAY
         BARE_NUPMY_NDARRAY = True
 
+    if sys_args.use_numpy_nptyping:
+        global USE_NUMPY_NPTYPING
+        USE_NUMPY_NPTYPING = True
+    
     if "all" in sys_args.ignore_invalid:
         FunctionSignature.ignore_invalid_signature = True
         FunctionSignature.ignore_invalid_defaultarg = True
