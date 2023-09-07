@@ -127,8 +127,10 @@ class Printer:
         pos_only = False
         kw_only = False
 
+        default_seen = False
+
         args = []
-        for arg in func.args:
+        for i, arg in enumerate(func.args):
             if arg.variadic:
                 pos_only = True
                 kw_only = True
@@ -136,9 +138,34 @@ class Printer:
                 pos_only = True
                 if sys.version_info[:2] >= (3, 8):
                     args.append("/")
-            if not kw_only and arg.kw_only:
-                kw_only = True
-                args.append("*")
+            if not kw_only:
+                if arg.kw_only:
+                    kw_only = True
+                    args.append("*")
+                else:
+                    if arg.default is None and default_seen:
+                        # Required arguments appear after default ones. A simple lazy hack.
+                        if "typing.overload" not in func.decorators:
+                            decorators = func.decorators.copy()
+                            decorators.insert(0, "typing.overload")
+                        else:
+                            decorators = func.decorators
+
+                        # copy the arguments with the current one as being required
+                        args_copy = func.args.copy()
+                        args_copy[i] = dataclasses.replace(args_copy[i], kw_only=True)
+                        func1 = dataclasses.replace(func, args=args_copy, decorators=decorators)
+                        out = self.print_function(func1)
+
+                        # copy the arguments with the previous ones as being non-default
+                        args_copy = func.args.copy()
+                        for j in range(i):
+                            args_copy[j] = dataclasses.replace(args_copy[j], default=None)
+                        func2 = dataclasses.replace(func, args=args_copy, decorators=decorators)
+                        out += self.print_function(func2)
+
+                        return out
+                    default_seen |= arg.default is not None
             args.append(self.print_argument(arg))
         if len(args) > 0 and args[0] == "/":
             args = args[1:]
@@ -149,7 +176,8 @@ class Printer:
         ]
 
         if func.returns is not None:
-            signature.append(f" -> {self.print_annotation(func.returns)}")
+            returns_str = self.print_annotation(func.returns)
+            signature.append(f" -> {returns_str if returns_str != '...' else 'typing.Any'}")
         signature.append(":")
 
         result: list[str] = [
@@ -283,9 +311,12 @@ class Printer:
         if str(type_.name) == "typing.Union" and type_.parameters is not None:
             return " | ".join(self.print_annotation(p) for p in type_.parameters)
         if type_.parameters:
+            annotations = [self.print_annotation(p) for p in type_.parameters]
+            if "..." in annotations:
+                return f"{type_.name}"
             param_str = (
                 "["
-                + ", ".join(self.print_annotation(p) for p in type_.parameters)
+                + ", ".join(annotations)
                 + "]"
             )
         else:
