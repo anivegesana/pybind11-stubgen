@@ -176,8 +176,7 @@ class Printer:
         ]
 
         if func.returns is not None:
-            returns_str = self.print_annotation(func.returns)
-            signature.append(f" -> {returns_str if returns_str != '...' else 'typing.Any'}")
+            signature.append(f" -> {self.print_annotation(func.returns)}")
         signature.append(":")
 
         result: list[str] = [
@@ -311,12 +310,9 @@ class Printer:
         if str(type_.name) == "typing.Union" and type_.parameters is not None:
             return " | ".join(self.print_annotation(p) for p in type_.parameters)
         if type_.parameters:
-            annotations = [self.print_annotation(p) for p in type_.parameters]
-            if "..." in annotations:
-                return f"{type_.name}"
             param_str = (
                 "["
-                + ", ".join(annotations)
+                + ", ".join([self.print_annotation(p) for p in type_.parameters])
                 + "]"
             )
         else:
@@ -325,13 +321,14 @@ class Printer:
 
     def print_annotation(self, annotation: Annotation) -> str:
         if isinstance(annotation, ResolvedType):
-            return self.print_type(annotation)
+            annotation_str = self.print_type(annotation)
         elif isinstance(annotation, Value):
-            return self.print_value(annotation)
+            annotation_str = self.print_value(annotation)
         elif isinstance(annotation, InvalidExpression):
-            return self.print_invalid_exp(annotation)
+            annotation_str = self.print_invalid_exp(annotation)
         else:
             raise AssertionError()
+        return annotation_str if annotation_str != '...' else 'typing.Any'
 
     def print_invalid_exp(self, invalid_expr: InvalidExpression) -> str:
         if self.invalid_expr_as_ellipses:
