@@ -381,7 +381,13 @@ class BaseParser(IParser):
         )
 
     def parse_value_str(self, value: str) -> Value:
-        return Value(value)
+        try:
+            value = value.strip()
+            ast.parse(value, mode="eval")
+            is_print_safe = True
+        except:
+            is_print_safe = False
+        return Value(value, is_print_safe)
 
     def report_error(self, error: ParserError):
         if isinstance(error, NameResolutionError):
@@ -595,8 +601,9 @@ class ExtractSignaturesFromPybind11Docstrings(IParser):
 
     def _parse_expression_str(self, expr_str: str) -> Value | InvalidExpression:
         try:
-            ast.parse(expr_str)
-            return self.parse_value_str(expr_str)
+            expr_str = expr_str.strip()
+            ast.parse(expr_str, mode="eval")
+            return Value(expr_str, True)
         except SyntaxError:
             self.report_error(InvalidExpressionError(expr_str))
             return InvalidExpression(expr_str)
